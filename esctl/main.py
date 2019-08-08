@@ -5,9 +5,9 @@ import argparse
 import pkg_resources
 import urllib3
 import warnings
+import importlib
 
 from box import Box
-import elasticsearch as elasticsearch
 from cliff.app import App
 from cliff.commandmanager import CommandManager
 
@@ -18,7 +18,7 @@ from esctl.override import EsctlTransport
 
 class Esctl(App):
 
-    _es = elasticsearch.Elasticsearch()
+    _es = None
     _pp = pprint.PrettyPrinter(indent=4)
     _config = utils.ConfigFileParser()
 
@@ -136,6 +136,19 @@ class Esctl(App):
 
         return scheme
 
+    def _initialize_es_client(self, servers, es_client_settings):
+        es_version = ''
+        if self.options.es_version is not None:
+            es_version = self.options.es_version
+
+        try:
+            elasticsearch = importlib.import_module('elasticsearch{}'.format(es_version))
+        except ModuleNotFoundError as error:
+            self.LOG.error("You asked to connect to an elasticsearch cluster in version {} but the required python module 'elasticsearch{}' is not installed. You should install the appropriate python module. Trying to use the default module but its version may not match the cluster's version...".format(es_version, es_version))
+            elasticsearch = importlib.import_module('elasticsearch')
+
+        return elasticsearch.Elasticsearch(servers, **es_client_settings)
+
     def initialize_app(self, argv):
         self._config.load_configuration()
         self.create_context()
@@ -163,7 +176,7 @@ class Esctl(App):
         if 'timeout' in self.context.settings:
             elasticsearch_client_kwargs['timeout'] = self.context.settings.get('timeout')
 
-        Esctl._es = elasticsearch.Elasticsearch(servers, **elasticsearch_client_kwargs)
+        Esctl._es = self._initialize_es_client(servers, elasticsearch_client_kwargs)
 
     def prepare_to_run_command(self, cmd):
         pass
@@ -240,6 +253,11 @@ class Esctl(App):
             default=False,
             action="store_true",
             help="Show tracebacks on errors.",
+        )
+        parser.add_argument(
+            "--es-version",
+            action="store",
+            help="Elasticsearch version.",
         )
 
         parser.add_argument("--context", action="store", help="Context to use")
