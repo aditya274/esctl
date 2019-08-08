@@ -65,21 +65,38 @@ class ClusterHealth(EsctlLister):
         return (getattr(Color, status.upper(), "END"), status, Color.END)
 
 
-class ClusterStats(EsctlCommand):
+class ClusterStats(EsctlLister):
     """Retrieve the cluster status."""
 
     def take_action(self, parsed_args):
         cluster_stats = self.transform(flatten_dict(Esctl._es.cluster.stats()))
-        Esctl._pp.pprint(cluster_stats)
+        cluster_stats = collections.OrderedDict(
+            sorted(cluster_stats.items())
+        )
+
+        return (("Attribute", "Value"), tuple(cluster_stats.items()))
+
+    def objects_list_to_flat_dict(self, lst):
+        flat_dict = {}
+        for (index, element) in enumerate(lst):
+            for (attribute, value) in element.items():
+                flat_dict['[{}].{}'.format(index, attribute)] = value
+
+        return flat_dict
 
     def transform(self, stats):
-        plugins_as_string = ""
-        for plugin in stats.get("nodes.plugins"):
-            plugins_as_string += "{}@{} ".format(
-                plugin.get("classname"), plugin.get("version")
-            )
+        for attribute, value in self.objects_list_to_flat_dict(stats.get('nodes.jvm.versions')).items():
+            stats.update({"nodes.jvm.versions{}".format(attribute): value})
 
-        stats["nodes.plugins"] = plugins_as_string
+        for attribute, value in self.objects_list_to_flat_dict(stats.get('nodes.os.cpu')).items():
+            stats.update({"nodes.os.cpu{}".format(attribute): value})
+            
+        for attribute, value in self.objects_list_to_flat_dict(stats.get('nodes.plugins')).items():
+            stats.update({"nodes.plugins{}".format(attribute): value})
+                
+        del stats["nodes.jvm.versions"]
+        del stats["nodes.os.cpu"]
+        del stats["nodes.plugins"]
 
         return stats
 
