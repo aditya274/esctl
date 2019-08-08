@@ -112,34 +112,19 @@ class Esctl(App):
 
     def create_context(self):
         if self.options.context:
-            try:
-                self.context = self._config.get_context_informations(
-                    str(self.options.context)
-                )
-                self.LOG.debug("Using provided context : " + self.context.name)
-            except AttributeError:
-                self.LOG.fatal("Cannot load provided context.")
-                sys.exit(1)
+            context_name = str(self.options.context)
+            self.LOG.debug("Using provided context : {}".format(context_name))
         else:
-            self.LOG.debug("No context provided. " "Using default context.")
-            try:
-                self.context = self._config.get_context_informations(
-                    self._config.__getattribute__("default-context")
-                )
-                self.LOG.debug("Using default context : " + self.context.name)
-            except AttributeError:
-                self.LOG.debug("Building noauth context.")
-                user = {"username": None, "password": None}
-                cluster = {"servers": [self.options.elasticsearch]}
-                self.context = utils.Context(
-                    "noauth", user=user, cluster=cluster
-                )
+            context_name = self._config.__getattribute__("default-context")
+            self.LOG.debug("No context provided. Using default context : {}".format(context_name))
 
-        if (
-            hasattr(self._config, "settings")
-            and self._config.settings is not None
-        ):
-            self.context.settings = Box(self._config.settings)
+        try:
+            self.context = self._config.get_context_informations(
+                context_name
+            )
+        except AttributeError:
+            self.LOG.fatal("Cannot load context '{}'.".format(context_name))
+            sys.exit(1)
 
     def find_scheme(self):
         scheme = "https"
@@ -165,32 +150,20 @@ class Esctl(App):
 
         http_auth = (username, password) if username and password else None
 
-        if (
-            hasattr(self.context, "settings")
-            and "no_check_certificate" in self.context.settings
-            and self.context.settings.no_check_certificate
-        ):
-            with warnings.catch_warnings(record=True) as warning:
-                self.LOG.debug(warning)
-                Esctl._es = elasticsearch.Elasticsearch(
-                    servers,
-                    http_auth=http_auth,
-                    verify_certs=False,
-                    scheme=self.find_scheme(),
-                    max_retries=0,
-                    transport_class=EsctlTransport,
-                    timeout=60,
-                )
-        else:
-            Esctl._es = elasticsearch.Elasticsearch(
-                servers,
-                http_auth=http_auth,
-                verify_certs=True,
-                scheme=self.find_scheme(),
-                max_retries=0,
-                transport_class=EsctlTransport,
-                timeout=60,
-            )
+        elasticsearch_client_kwargs = {
+            'http_auth': http_auth,
+            'verify_certs': self.context.settings.get('no_check_certificate', True),
+            'scheme': self.find_scheme(),
+            'transport_class': EsctlTransport,
+        }
+
+        if 'max_retries' in self.context.settings:
+            elasticsearch_client_kwargs['max_retries'] = self.context.settings.get('max_retries')
+
+        if 'timeout' in self.context.settings:
+            elasticsearch_client_kwargs['timeout'] = self.context.settings.get('timeout')
+
+        Esctl._es = elasticsearch.Elasticsearch(servers, **elasticsearch_client_kwargs)
 
     def prepare_to_run_command(self, cmd):
         pass
@@ -268,12 +241,6 @@ class Esctl(App):
             action="store_true",
             help="Show tracebacks on errors.",
         )
-        # parser.add_argument(
-        #     "--no-check-certificate",
-        #     default=False,
-        #     action="store_true",
-        #     help="Disable SSL certificate verification",
-        # )
 
         parser.add_argument("--context", action="store", help="Context to use")
 

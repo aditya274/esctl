@@ -193,7 +193,14 @@ class ConfigFileParser:
             self.contexts.get(context_name).get("cluster")
         )
 
-        return Context(context_name, user=user, cluster=cluster)
+        # Merge global settings and per-cluster settings.
+        # Cluster-level settings override global settings
+        if 'settings' in cluster:
+            settings = {**self.settings, **cluster.get('settings')}
+        else:
+            settings = {**self.settings}
+
+        return Context(context_name, user=user, cluster=cluster, settings=settings)
 
 
 def print_success(message):
